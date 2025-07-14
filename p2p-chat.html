@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>P2P Chat with Clean UI</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+  textarea, input { width: 100%; margin-top: 10px; font-size: 1em; }
+  #log { border: 1px solid #ccc; padding: 10px; height: 180px; overflow-y: auto; margin-top: 10px; }
+  button { margin-top: 10px; }
+  .hidden { display: none; }
+  .flex-row { display: flex; gap: 10px; align-items: center; margin-top: 5px; }
+  .flex-row textarea { flex: 1; height: 80px; resize: vertical; }
+</style>
+</head>
+<body>
+<h2>WebRTC P2P Chat (Clean UI)</h2>
+
+<div id="step1">
+  <button id="createOfferBtn">1. Create Offer & Generate Link</button>
+  <div id="offerSection" class="hidden">
+    <div class="flex-row">
+      <textarea id="offerLink" readonly></textarea>
+      <button onclick="copyText('offerLink')">Copy Offer Link</button>
+    </div>
+  </div>
+</div>
+
+<div id="step2" class="hidden">
+  <label for="remoteAnswer">2. Paste Answer from Peer B</label>
+  <div class="flex-row">
+    <textarea id="remoteAnswer" placeholder="Paste answer here"></textarea>
+    <button onclick="copyText('remoteAnswer')">Copy Answer</button>
+  </div>
+  <button id="setAnswerBtn">Set Remote Answer</button>
+</div>
+
+<h3>Chat</h3>
+<div id="log"></div>
+<input id="message" placeholder="Type message..." onkeydown="if(event.key==='Enter') sendMessage()" />
+<button onclick="sendMessage()">Send</button>
+
+<script>
+const pc = new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+let channel;
+
+function log(msg){
+  const logDiv = document.getElementById("log");
+  logDiv.innerHTML += msg + "<br>";
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+function base64Encode(obj){
+  return btoa(JSON.stringify(obj));
+}
+function base64Decode(str){
+  return JSON.parse(atob(str));
+}
+
+function copyText(id){
+  const el = document.getElementById(id);
+  el.select();
+  el.setSelectionRange(0, 99999);
+  navigator.clipboard.writeText(el.value).then(() => {
+    alert('Copied to clipboard!');
+  }).catch(() => {
+    alert('Copy failed. Please copy manually.');
+  });
+}
+
+function createDataChannel(){
+  channel = pc.createDataChannel("chat");
+  channel.onopen = () => log("[Channel opened]");
+  channel.onmessage = e => log("Peer: " + e.data);
+}
+
+pc.ondatachannel = e => {
+  channel = e.channel;
+  channel.onopen = () => log("[Channel opened]");
+  channel.onmessage = e => log("Peer: " + e.data);
+};
+
+pc.onicecandidate = e => {
+  if(e.candidate === null && pc.localDescription){
+    if(pc.localDescription.type === "offer"){
+      const encoded = base64Encode(pc.localDescription);
+      const url = `${location.origin}${location.pathname}?offer=${encodeURIComponent(encoded)}`;
+      document.getElementById("offerLink").value = url;
+      document.getElementById("offerSection").classList.remove("hidden");
+      document.getElementById("createOfferBtn").disabled = true;
+      document.getElementById("step2").classList.remove("hidden");
+    }
+    if(pc.localDescription.type === "answer"){
+      document.getElementById("remoteAnswer").value = JSON.stringify(pc.localDescription);
+    }
+  }
+}
+
+document.getElementById("createOfferBtn").onclick = () => {
+  createDataChannel();
+  pc.createOffer().then(offer => pc.setLocalDescription(offer));
+};
+
+document.getElementById("setAnswerBtn").onclick = () => {
+  let answerStr = document.getElementById("remoteAnswer").value.trim();
+  if (!answerStr) return alert("Please paste a valid answer.");
+  try {
+    const answer = JSON.parse(answerStr);
+    pc.setRemoteDescription(answer);
+  } catch {
+    alert("Invalid answer JSON");
+  }
+};
+
+function sendMessage(){
+  const msgInput = document.getElementById("message");
+  const msg = msgInput.value.trim();
+  if(!msg) return;
+  if(channel && channel.readyState === "open"){
+    channel.send(msg);
+    log("You: " + msg);
+    msgInput.value = "";
+  } else {
+    log("Channel not open");
+  }
+}
+
+// Auto process URL offer if present
+window.onload = () => {
+  const params = new URLSearchParams(window.location.search);
+  if(params.has("offer")){
+    try {
+      const offer = base64Decode(params.get("offer"));
+      pc.setRemoteDescription(offer)
+        .then(() => pc.createAnswer())
+        .then(answer => pc.setLocalDescription(answer));
+      pc.onicecandidate = e => {
+        if(e.candidate === null && pc.localDescription && pc.localDescription.type === "answer"){
+          document.getElementById("remoteAnswer").value = JSON.stringify(pc.localDescription);
+          document.getElementById("step2").classList.remove("hidden");
+        }
+      };
+      document.getElementById("step1").classList.add("hidden");
+      pc.ondatachannel = e => {
+        channel = e.channel;
+        channel.onopen = () => log("[Channel opened]");
+        channel.onmessage = e => log("Peer: " + e.data);
+      };
+    } catch {
+      alert("Invalid offer in URL");
+    }
+  }
+};
+</script>
+</body>
+</html>
