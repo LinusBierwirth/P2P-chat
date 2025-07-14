@@ -1,36 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>P2P Chat Minimalist</title>
-<style>
-  body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-  textarea { width: 100%; height: 100px; font-size: 1em; margin-top: 10px; display: none; }
-  #log { border: 1px solid #ccc; padding: 10px; height: 180px; overflow-y: auto; margin-top: 20px; display: none; }
-  input { width: 100%; margin-top: 10px; font-size: 1em; display: none; }
-  button { margin-top: 10px; }
-</style>
+  <meta charset="UTF-8" />
+  <title>P2P Chat</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; }
+    textarea { width: 100%; height: 100px; font-size: 1em; margin: 10px 0; }
+    input { width: 100%; margin-top: 10px; font-size: 1em; }
+    button { margin-top: 10px; display: block; }
+    #log { border: 1px solid #ccc; padding: 10px; height: 180px; overflow-y: auto; margin-top: 20px; }
+    .hidden { display: none; }
+  </style>
 </head>
 <body>
 <h2>P2P Chat</h2>
 
-<button id="createOfferBtn">📤 Create Offer</button>
-<textarea id="offerOut" readonly></textarea>
+<div id="offer-creation">
+  <button id="generate-offer">Generate Offer</button>
+</div>
 
-<textarea id="answerIn" placeholder="Paste answer here..."></textarea>
-<button id="setAnswerBtn">Set Answer</button>
+<div id="offer-output" class="hidden">
+  <textarea id="local-offer" readonly></textarea>
+  <button id="copy-offer">Copy Offer</button>
+</div>
 
-<div id="log"></div>
-<input id="message" placeholder="Type message..." onkeydown="if(event.key==='Enter')sendMessage()" />
+<div id="remote-offer-section">
+  <textarea id="remote-offer" placeholder="Paste offer here..."></textarea>
+  <button id="set-remote-offer">Set Remote Offer</button>
+</div>
+
+<div id="answer-output" class="hidden">
+  <textarea id="local-answer" readonly></textarea>
+  <button id="copy-answer">Copy Answer</button>
+</div>
+
+<div id="answer-input" class="hidden">
+  <textarea id="remote-answer" placeholder="Paste answer here..."></textarea>
+  <button id="set-remote-answer">Set Remote Answer</button>
+</div>
+
+<div id="chat" class="hidden">
+  <h3>Connected</h3>
+  <div id="log"></div>
+  <input id="message" placeholder="Type message..." onkeydown="if(event.key==='Enter')sendMessage()" />
+</div>
 
 <script>
 let pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
 let channel;
 
-function log(msg) {
-  const logDiv = document.getElementById("log");
-  logDiv.innerHTML += msg + "<br>";
-  logDiv.scrollTop = logDiv.scrollHeight;
+function $(id) {
+  return document.getElementById(id);
 }
 
 function base64(obj) {
@@ -40,65 +60,103 @@ function unbase64(str) {
   return JSON.parse(atob(str));
 }
 
-function showChatUI() {
-  document.getElementById("createOfferBtn").style.display = "none";
-  document.getElementById("offerOut").style.display = "none";
-  document.getElementById("answerIn").style.display = "none";
-  document.getElementById("setAnswerBtn").style.display = "none";
-  document.getElementById("log").style.display = "block";
-  document.getElementById("message").style.display = "block";
+function log(msg) {
+  const logDiv = $("log");
+  logDiv.innerHTML += msg + "<br>";
+  logDiv.scrollTop = logDiv.scrollHeight;
 }
 
-function setupChannel() {
+function showChat() {
+  ["offer-creation", "offer-output", "remote-offer-section", "answer-output", "answer-input"].forEach(id => $(id).classList.add("hidden"));
+  $("chat").classList.remove("hidden");
+  $("message").focus();
+}
+
+function setupChannelHandlers() {
   channel.onopen = () => {
     log("[Channel opened]");
-    showChatUI();
+    showChat();
   };
   channel.onmessage = e => log("Peer: " + e.data);
 }
 
-document.getElementById("createOfferBtn").onclick = () => {
-  channel = pc.createDataChannel("chat");
-  setupChannel();
-
-  pc.onicecandidate = e => {
-    if (e.candidate === null && pc.localDescription) {
-      document.getElementById("offerOut").value = base64(pc.localDescription);
-      document.getElementById("offerOut").style.display = "block";
-      document.getElementById("answerIn").style.display = "block";
-      document.getElementById("setAnswerBtn").style.display = "inline-block";
-    }
-  };
-
-  pc.createOffer().then(o => pc.setLocalDescription(o));
-};
-
-document.getElementById("setAnswerBtn").onclick = () => {
-  const txt = document.getElementById("answerIn").value.trim();
-  if (!txt) return;
-  try {
-    const answer = unbase64(txt);
-    pc.setRemoteDescription(answer);
-  } catch {
-    log("Invalid answer.");
-  }
-};
-
-pc.ondatachannel = e => {
-  channel = e.channel;
-  setupChannel();
-};
-
 function sendMessage() {
-  const input = document.getElementById("message");
+  const input = $("message");
   const msg = input.value.trim();
   if (!msg || !channel || channel.readyState !== "open") return;
   channel.send(msg);
   log("You: " + msg);
   input.value = "";
 }
+
+// PEER A — Create offer
+$("generate-offer").onclick = async () => {
+  channel = pc.createDataChannel("chat");
+  setupChannelHandlers();
+
+  pc.onicecandidate = e => {
+    if (e.candidate === null) {
+      $("local-offer").value = base64(pc.localDescription);
+      $("offer-creation").classList.add("hidden");
+      $("offer-output").classList.remove("hidden");
+      $("answer-input").classList.remove("hidden");
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+};
+
+// Copy offer
+$("copy-offer").onclick = () => {
+  navigator.clipboard.writeText($("local-offer").value);
+};
+
+// PEER B — Receive offer, create answer
+$("set-remote-offer").onclick = async () => {
+  try {
+    const offer = unbase64($("remote-offer").value.trim());
+    await pc.setRemoteDescription(offer);
+
+    channel = null;
+    pc.ondatachannel = e => {
+      channel = e.channel;
+      setupChannelHandlers();
+    };
+
+    pc.onicecandidate = e => {
+      if (e.candidate === null) {
+        $("local-answer").value = base64(pc.localDescription);
+        $("answer-output").classList.remove("hidden");
+        $("remote-offer-section").classList.add("hidden");
+      }
+    };
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+  } catch (err) {
+    log("Failed to set remote offer.");
+  }
+};
+
+// Copy answer
+$("copy-answer").onclick = () => {
+  navigator.clipboard.writeText($("local-answer").value);
+};
+
+// PEER A — Receive answer
+$("set-remote-answer").onclick = async () => {
+  try {
+    const answer = unbase64($("remote-answer").value.trim());
+    await pc.setRemoteDescription(answer);
+    $("answer-input").classList.add("hidden");
+  } catch (err) {
+    log("Failed to set remote answer.");
+  }
+};
 </script>
 </body>
 </html>
+
 
 
